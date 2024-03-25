@@ -1,0 +1,392 @@
+#!/bin/bash
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+# shellcheck disable=all
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+# TEST FUNCS
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst_success=true
+tst_exit(){
+	if [[ $tst_success == true && "$?" == "0" ]]; then
+		green; echo "[.] test"; nocolor
+	else
+		exit $o_def_exic
+	fi
+}
+trap tst_exit EXIT
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst(){
+	tst_head="$1"
+}
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+exp(){
+	local eexc=$1
+	local eout="$(</dev/stdin)"
+	local code="$(declare -f __ | sed '1,2d;$d')"
+	export o_test=true
+	local out; out=$(eval "$code")
+	local exc=$?
+	if [[ "$out" != "$eout" || $exc != $eexc ]]; then
+		white; echo "[T][:] $tst_head"; nocolor
+		if [[ "$out" != "$eout" ]]; then
+			orange; echo "[T][out]"; nocolor
+			echo "$out"
+			orange; echo "[T][exp]"; nocolor
+			echo "$eout"
+		fi
+		if [[ $exc != $eexc ]]; then
+			orange; echo "[T][ret]"; nocolor
+			echo "$1"
+			orange; echo "[T][exp]"; nocolor
+			echo $exc
+		fi
+		tst_success=false
+		red; echo "[T][x] $tst_head"; nocolor
+		echo
+	fi
+}
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+# TESTS
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+org="$(realpath "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../..")"
+source $org/src/ops/ops.sh
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+o_chr_oph_test="
+————————————————————————————————————————————————————————————————————————————————
+$o_chr_oph"
+o_chr_sum_test="
+————————————————————————————————————————————————————————————————————————————————
+$o_chr_sum"
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Missing op"; __(){
+	op "Operation" dbg true; _(){
+		_(){
+			echo bla
+		}; po
+	}; po
+}; exp $o_def_exic <<- eof
+$o_chr_oph_test Operation
+$o_chr_ler Missing op declaration
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Missing _"; __(){
+	op "Operation"; _(){
+		op "SubOperation"; po
+	}; po
+}; exp $o_def_exic <<- eof
+$o_chr_oph_test Operation
+$o_chr_oph_test SubOperation
+$o_chr_ler Missing _ declaration
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Missing po"; __(){
+	op "Operation"; _(){
+		op "SubOperation"; _(){
+			echo Inside1
+		};
+		op "SubOperation"; _(){
+			echo Inside2
+		}; po
+	}; po
+}; exp $o_def_exic <<- eof
+$o_chr_oph_test Operation
+$o_chr_oph_test SubOperation
+$o_chr_oph_test SubOperation
+$o_chr_ler Missing po invocation
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Missing description"; __(){
+	op; _(){
+		echo Test
+	}; po
+}; exp $o_def_exic <<- eof
+$o_chr_oph_test
+$o_chr_ler op must have a description as first argument
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Nesting"; __(){
+	op "Operation"; _(){
+		echo Outside
+		op "SubOperation"; _(){
+			op "SubSubOperation"; _(){
+				echo Inside
+			}; po
+		}; po
+	}; po
+}; exp 0 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_oph_test SubSubOperation
+$o_chr_cmd echo Inside
+Inside
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Error prompt"; __(){
+	op "Operation" err "prompt"; _(){
+		echo BeforeError
+		nocmd
+		echo AfterError
+	}; echo "R" | po;
+}; exp 127 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo BeforeError
+BeforeError
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+$o_chr_pmt [I]gnore / [C]ontinue / [R]eturn / [E]xit / Retr[Y]: R
+$o_chr_inf Returning
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Error"; __(){
+	op "Operation" err 'return'; _(){
+		echo Outside
+		op "SubOperation" err 'return'; _(){
+			nocmd
+			echo AfterError
+		}; po
+	}; po;
+}; exp 127 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Error #2"; __(){
+	op "Operation" err 'ignore'; _(){
+		echo Outside
+		op "SubOperation" err 'return'; _(){
+			nocmd
+			echo AfterError
+		}; po
+	}; po;
+}; exp 0 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Error #3"; __(){
+	op "Operation" err 'continue'; _(){
+		echo Outside
+		op "SubOperation" err 'return'; _(){
+			nocmd
+			echo AfterError
+		}; po
+		echo Outside
+	}; po;
+}; exp 127 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+$o_chr_cmd echo Outside
+Outside
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Error #4"; __(){
+	op "Operation" err 'return'; _(){
+		echo Outside
+		op "SubOperation" err 'return'; _(){
+			nocmd
+			echo AfterError
+		}; po
+		echo Outside
+	}; po;
+}; exp 127 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Error #5"; __(){
+	op "Operation" err 'continue'; _(){
+		echo Outside
+		op "SubOperation" err 'exit'; _(){
+			nocmd
+			echo AfterError
+		}; po
+		echo Outside
+	}; po
+}; exp 127 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Error #6"; __(){
+	op "Operation" err 'exit'; _(){
+		echo Outside
+		op "SubOperation" err 'continue'; _(){
+			nocmd
+			echo AfterError
+		}; po
+		echo Outside
+	}; po;
+}; exp 127 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+$o_chr_cmd echo AfterError
+AfterError
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Error #7"; __(){
+	op "Operation" err 'return'; _(){
+		echo Outside
+		op "SubOperation" err 'continue'; _(){
+			nocmd
+			echo AfterError
+		}; po
+		echo Outside
+	}; po;
+}; exp 127 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+$o_chr_cmd echo AfterError
+AfterError
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Error #8"; __(){
+	op "Operation" err 'ignore'; _(){
+		echo Outside
+		op "SubOperation" err 'continue'; _(){
+			nocmd
+			echo AfterError
+		}; po
+		echo Outside
+	}; po;
+}; exp 0 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+$o_chr_cmd echo AfterError
+AfterError
+$o_chr_cmd echo Outside
+Outside
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Error #9"; __(){
+	op "Operation" err 'return'; _(){
+		echo Outside
+		op "SubOperation" err 'ignore'; _(){
+			nocmd
+			echo AfterError
+		}; po
+		echo Outside
+	}; po;
+}; exp 0 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+$o_chr_cmd echo AfterError
+AfterError
+$o_chr_cmd echo Outside
+Outside
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Skip After return"; __(){
+	op "Operation" err 'continue'; _(){
+		echo Outside
+		op "SubOperation" err 'return'; _(){
+			nocmd
+			echo AfterError
+			op "SubSubOperation"; _(){
+				echo AfterError
+			}; po
+		}; po
+		echo Outside
+	}; po;
+}; exp 127 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Outside
+Outside
+$o_chr_oph_test SubOperation
+$o_chr_cmd nocmd
+$o_chr_err nocmd: command not found
+$o_chr_err nocmd
+$o_chr_cmd echo Outside
+Outside
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+tst "Summary"; __(){
+	op "Operation" sry 'yes'; _(){
+		echo Inside
+	}; po;
+}; exp 0 <<- eof
+$o_chr_oph_test Operation
+$o_chr_cmd echo Inside
+Inside
+$o_chr_sum_test Summary
+$o_chr_unk Operation
+$o_chr_unk Operation
+  $o_chr_unk SubOperation
+$o_chr_unk Operation
+  $o_chr_unk SubOperation
+    $o_chr_unk SubOperation
+$o_chr_unk
+$o_chr_ook Operation
+  $o_chr_ook SubOperation
+    $o_chr_ook SubSubOperation
+$o_chr_err Operation
+$o_chr_err Operation
+  $o_chr_err SubOperation
+$o_chr_ook Operation
+  $o_chr_err SubOperation
+$o_chr_err Operation
+  $o_chr_err SubOperation
+$o_chr_err Operation
+  $o_chr_err SubOperation
+$o_chr_err Operation
+  $o_chr_err SubOperation
+$o_chr_err Operation
+  $o_chr_err SubOperation
+$o_chr_err Operation
+  $o_chr_err SubOperation
+$o_chr_ook Operation
+  $o_chr_err SubOperation
+$o_chr_ook Operation
+  $o_chr_ook SubOperation
+$o_chr_err Operation
+  $o_chr_err SubOperation
+    $o_chr_skp SubSubOperation
+$o_chr_ook Operation
+eof
+#———————————————————————————————————————————————————————————————————————————————————————————————————————————————————————

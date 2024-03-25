@@ -1,0 +1,984 @@
+#!/bin/bash
+
+# SETTINGS
+o_set_name=ops
+o_set_deps=(stty cat sed base64 gzip sleep  pwd mkdir)
+o_set_mshv=5.0
+
+# DEFAULTS
+o_def_errp='return'
+o_def_exic=111
+
+# STRINGS
+o_chr_idt="  ";  o_chr_oph="[:]"; o_chr_skp="[;]"; o_chr_ssh="[@]"; o_chr_chr="[/]"; o_chr_dkr="[#]"; o_chr_cmd="[>]";
+o_chr_inf="[!]"; o_chr_pmt="[$]"; o_chr_ook="[.]"; o_chr_err="[x]"; o_chr_unk="[?]"; o_chr_abt="[|]"; o_chr_sum="[=]";
+o_chr_lst="[{]"; o_chr_len="[}]"; o_chr_var="[$]"; o_chr_ler="[o]";
+
+# PUBLIC FUNCTIONS
+op()     { o_op "$@"; }
+po()     { o_po  "$@"; }
+err()    { o_err 'man' "$@"; }
+quit()   { o_err 'quit' "$@"; }
+dsc()    { o_dsc "$@"; }
+hlp()    { o_hlp "$@"; }
+var()    { o_var "$@"; }
+quiet()  { o_quiet "$@"; }
+print()  { o_print "$@"; }
+opsnew() { o_opsnew "$@"; }
+
+nocolor() { o_nocolor; }
+bold()    { o_bold; }
+dim()     { o_dim; }
+white()   { o_white; }
+red()     { o_red; }
+green()   { o_green; }
+orange()  { o_orange; }
+yellow()  { o_yellow; }
+lpurple() { o_lpurple; }
+
+# PUBLIC UTILS
+fdup()  { o_fdup "$@"; } # Finds a file in current or parent folders
+fnex()  { o_fnex "$@"; } # Used by ops
+fnrm()  { o_fnrm "$@"; } # Removes a function
+uuid()  { o_uuid     ; } # Generate UUID
+term()  { o_term     ; } # Checks if stdout is terminal
+vers()  { o_vers "$@"; } # Compares version numbers
+path()  { o_path "$@"; } # Creates the path for the given file
+arry()  { o_arry "$@"; } # Transforms arry into string?
+strm()  { o_strm "$@"; } # Trims string spaces at both ends
+sstr()  { o_sstr "$@"; } # Tests if first argument is substring of second argument
+snas()  { o_snas "$@"; } # Removes ANSI escape sequences from string
+slen()  { o_slen "$@"; } # Returns length of a string without ANSI escape sequences
+sljt()  { o_sljt "$@"; } # Appends a string to another to make it of desired length
+slwd()  { o_slwd "$@"; } # Returns last word from string
+stln()  { o_stln "$@"; } # Trims last n chars from string
+line()  { o_line "$@"; } # Changes line of text in file # TODO: Check
+otree() { o_tree "$@"; } # Displays tree command output with info starting on same row as folder/file
+
+# FUNCS
+o_main(){ # Main entrypoint
+	if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+		local opsfile; opsfile=$(o_fdup ops)
+		[[ -n "$opsfile" ]] && source "$opsfile"
+	else
+		o_main_init "$@"
+		o_main_deps
+		o_main_mshv
+	fi
+}
+
+	o_main_init(){ # Init
+		if [[ -z "$o_sess" && $1 != "import" ]]; then
+			o_sess=$(o_uuid); export o_sess
+		elif [[ -f /tmp/$o_sess.env ]]; then
+			source "/tmp/$o_sess.env"
+		fi
+		o_remt=false
+		o_noab=false
+		o_desc=""
+		o_help=""
+		o_cmdm=false
+		o_test=false
+		o_o_cmda=()
+		o_o_cmda+="$@"
+	}
+
+	o_main_deps(){ # Check dependencies
+		local dep; for dep in "${o_set_deps[@]}"; do
+			if ! command -v "$dep" &> /dev/null; then
+				quit "$(printf "Command %s not found" "$dep")"
+			fi
+		done
+	}
+
+	o_main_mshv(){ # Check minimum bash version
+		o_vers "$BASH_VERSION" "$o_set_mshv"; if [[ $? == 2 ]]; then
+			quit "$(printf "%s needs bash version older than: %s" "$o_set_name" "$o_set_mshv")"
+		fi
+	}
+
+o_op(){ # Declare the op
+	o_o_exip+=($?)
+	o_op_push "$@"
+	o_op_args "$@"
+	o_op_chck "$@"
+	if [[ -z "${o_o_func[-1]}" ]]; then o_op_prnt "$@"; fi
+}
+
+	o_op_prnt(){ # Announce op start
+		if [[ ${o_o_when[-1]} == true && ${o_o_skip[-1]} == false ]] && o_cmd op; then
+			o_print op "${o_o_desc[-1]}${o_o_rsfx[*]}"
+		fi
+		o_log "$o_chr_lst ${o_o_uuid[-1]} ${#o_o_uuid[@]} ${o_o_desc[-1]}${o_o_rsfx[*]}"
+	}
+
+	o_op_push(){ # Push op to the stack, default values
+		o_o_func+=("")
+		o_o_args+=("$1")
+		o_o_argl+=(1)
+		o_o_cags+=("$1")
+		o_o_cagl+=(1)
+		local def_errp="$o_def_errp"
+		(( ${#o_o_errp[@]} >= 1 )) && def_errp="${o_o_errp[-1]}"
+		local def_quet=false
+		(( ${#o_o_quet[@]} >= 1 )) && def_quet="${o_o_quet[-1]}"
+		o_o_call+=(false)
+		o_o_skip+=($([[ ${#o_o_errp[@]} != 0 && (( ${o_o_errp[-1]} == 'return' && ${o_o_exic[-1]} != '0' ) || ${o_o_errp[-1]} == 'retry' ) ]] && echo true || echo false))
+		o_o_uuid+=("$(o_uuid)")
+		o_o_desc+=("$1")
+		o_o_exic+=(0)
+		o_o_errp+=("$def_errp")
+		o_o_smry+=(false)
+		o_o_when+=(true)
+		o_o_pars+=("")
+		o_o_rmtd=$o_o_rmtd
+		o_o_rarg=$o_o_rarg
+		o_o_rlen=$o_o_rlen
+		o_o_rsfx=$o_o_rsfx
+		o_o_cmda+=("${o_o_cmda[-1]}")
+		o_o_cmds+=("")
+		o_o_cmdl+=(1)
+		o_o_quet+=("$def_quet")
+	}
+
+	o_op_args(){ # Parse op args
+		local args=("$@")
+		local rm_mtds
+		local rm_args
+		local rm_sbfx
+		#
+		local i=1; while [[ $i -lt $((${#args[@]}-1)) ]]; do
+			local aname=${args[$i]}
+			local aval=${args[$i+1]}
+			i=$((i+2))
+			#
+			case $aname in
+				"func")
+					o_o_func[-1]="$aval"
+				;;
+				"cmd")
+					if [[ -z "${o_o_cmds[-1]}" ]]; then
+						o_o_cmds[-1]="$aval"
+					else
+						o_o_cmds+=("$aval")
+						o_o_cmdl[-1]=$(( ${o_o_cmdl[-1]}+1 ))
+					fi
+				;;
+				*)
+				o_o_args+=("$aname" "$aval")
+				o_o_argl[-1]=$(( ${o_o_argl[-1]}+2 ))
+				;;
+			esac
+			#
+			case $aname in
+				"func")
+				;;
+				*)
+				o_o_cags+=("$aname" "$aval")
+				o_o_cagl[-1]=$(( ${o_o_cagl[-1]}+2 ))
+				;;
+			esac
+			#
+			case $aname in
+				"call")
+					if [[ $aval == true || $aval == 'yes' ]]; then
+						o_o_call[-1]=true
+					elif [[ $aval == false || $aval == 'no' ]]; then
+						o_o_call[-1]=false
+					fi
+				;;
+				"par")
+					o_o_pars[-1]=$aval
+				;;
+				"quiet")
+					if [[ $aval == true || $aval == 'yes' ]]; then
+						o_o_quet[-1]=true
+					elif [[ $aval == false || $aval == 'no' ]]; then
+						o_o_quet[-1]=false
+					fi
+				;;
+				"err")
+					o_o_errp[-1]=$aval
+				;;
+				"whn")
+					if [[ $aval == true || $aval == 'yes' ]]; then
+						o_o_when[-1]=true
+					elif [[ $aval == false || $aval == 'no' ]]; then
+						o_o_when[-1]=false
+					fi
+				;;
+				"sry")
+					if [[ $aval == true || $aval == 'yes' ]]; then
+						o_o_smry[-1]=true
+					elif [[ $aval == false || $aval == 'no' ]]; then
+						o_o_smry[-1]=false
+					fi
+				;;
+				"ssh")
+					rm_mtds+=('ssh')
+					rm_args+=("$aval")
+					rm_sbfx+=" $o_chr_ssh $aval"
+				;;
+				"dkr")
+					rm_mtds+=('dkr')
+					rm_args+=("$aval")
+					rm_sbfx+=" $o_chr_dkr $aval"
+				;;
+				"ach")
+					rm_mtds+=('ach')
+					rm_args+=("$aval")
+					rm_sbfx=" $o_chr_chr $aval"
+				;;
+				*);;
+			esac
+		done
+		#
+		o_o_rlen+=("${#rm_mtds[@]}")
+		o_o_rmtd+=("${rm_mtds[@]}")
+		o_o_rarg+=("${rm_args[@]}")
+		o_o_rsfx+=("$rm_sbfx")
+	}
+
+	o_op_chck(){ # Checks
+		local args=("$@")
+		#
+		o_fnrm _
+		if (( ${#args[@]} == 0 )); then
+			o_op_prnt
+			quit "op must have a description as first argument"
+		elif [[ ${#args[@]} -gt 1 ]] && [[ $(( ${#args[@]} % 2 )) -eq 0 ]]; then
+			o_op_prnt
+			quit "op can't have even number of arguments"
+		elif [[ "$o_cufn" != 'po' ]] && [[ -n "$o_cufn" ]] ; then
+			o_op_prnt
+			quit "Missing po invocation"
+		fi
+		#
+		o_cufn=op
+	}
+
+o_po(){ # Run the op
+	# Func
+	if [[ ${o_o_func[-1]} != "" ]]; then
+		o_po_func
+	# Execute
+	else
+		o_po_chck
+		o_po_init
+		# Execute
+		if [[ ${o_o_when[-1]} == true && ${o_o_skip[-1]} == false ]] && o_cmd po; then
+			# Params
+			local x=0; for par in ${o_o_pars[-1]}; do
+				local oargs=("${o_o_cmda[-1]}")
+				if [[ -n "${oargs[$x]}" ]]; then
+					declare "$par"="${oargs[$x]}"
+					x=$(( x+1 ))
+				fi
+			done
+			# Local
+			o_evals=$(cat <<-eof
+				_oo_(){
+					$(declare -f _ | sed '1,2d;$d')
+				}; _oo_
+			eof
+			)
+			# Remote
+			[[ $o_remt == false ]] && o_srcb64=$( ( gzip | base64 -w0 ) <<< "$(cat "${BASH_SOURCE[0]}")" )
+			local i; for (( i=1; i<=${o_o_rlen[-1]}; i++ )); do
+				o_evals=$( cat <<-eof
+					_ooo_(){
+						o_srcb64="$o_srcb64"
+						source <( (base64 -d | gzip -d ) <<< \$o_srcb64 )
+						o_remt=true
+						o_sess=$o_sess
+						o_desc="$o_desc"
+						o_help="$o_help"
+						$(o_po_stack_str)
+						$o_evals
+					}; _ooo_
+				eof
+				)
+				o_evals=$( ( gzip | base64 -w0 ) <<< "$o_evals" )
+				#
+				case ${o_o_rmtd[-$i]} in
+					"ssh")
+						o_evals=$( cat <<-eof
+						_ooo_(){
+							trap - ERR
+							ssh -t ${o_o_rarg[-$i]} "bash -c \"\\\$((base64 -d | gzip -d ) <<< $o_evals)\""
+							local exic=\$?
+							o_po_logp <<< \$(ssh -t ${o_o_rarg[-$i]} "cat /tmp/$o_sess.log" 2> /dev/null)
+							trap 'o_err op' ERR
+							return "\$exic"
+						}; _ooo_
+						eof
+						)
+					;;
+					"dkr")
+						o_evals=$(<<-eof
+						_ooo_(){
+							trap - ERR
+							docker exec -it ${o_o_rarg[-$i]} bash -c "(base64 -d | gzip -d | bash) <<< $o_evals"
+							local exic=\$?
+							trap 'o_err op' ERR
+							return "\$exic"
+						}; _ooo_
+						eof
+						)
+					;;
+					"ach")
+						o_evals=$(<<-eof
+						_ooo_(){
+							trap - ERR
+							arch-chroot ${o_o_rarg[-$i]} bash -c "(base64 -d | gzip -d | bash) <<< $o_evals"
+							trap 'o_err op' ERR
+							return "\$exic"
+						}; _ooo_
+						eof
+						)
+					;;
+				esac
+			done
+			# Outer
+			_ooo_(){
+				cat > "/tmp/$o_sess.env" <<-eof
+					o_sess="$o_sess"
+					$(o_po_stack_str)
+				eof
+				eval "$o_evals"
+				# Retry
+				if [[ ${o_o_errp[-1]} == 'retry' ]]; then
+					o_o_errp[-1]='prompt'
+					_ooo_
+				fi
+			}; _ooo_
+			#
+			o_log "$o_chr_len ${o_o_uuid[-1]} ${o_o_exic[-1]}"
+			[[ ${o_o_smry[-1]} == true && ${o_o_call[-1]} == false ]] && o_smry
+		# Skip
+		else
+			if [[ ${o_o_when[-1]} == false || ${o_o_skip[-1]} == true ]]; then
+				o_log "$o_chr_len ${o_o_uuid[-1]} skip"
+			else
+				o_log "$o_chr_len ${o_o_uuid[-1]} nocmd"
+			fi
+			o_o_exic[-1]=${o_o_exip[-1]}
+		fi
+		# Finish
+		local exic=${o_o_exic[-1]}
+		o_po_stack_pop
+		o_po_finish
+		return "$exic"
+	fi
+}
+
+	o_po_func(){
+		local oargs
+		local i; for (( i=1; i<=${o_o_argl[-1]}; i++ )); do
+			oargs+=("${o_o_args[((-(1+${o_o_argl[-1]}-$i)))]}")
+		done
+		local ocargs
+		local i; for (( i=1; i<=${o_o_cagl[-1]}; i++ )); do
+			ocargs+=("${o_o_cags[((-(1+${o_o_cagl[-1]}-$i)))]}")
+		done
+		o_evals=$(cat <<-eof
+			${o_o_func[-1]}(){
+				o_o_cmda[-1]="\$@"
+				op $(printf "'%s' " "${oargs[@]}") call true; _(){
+					$(declare -f _ | sed '1,2d;$d')
+				}; po
+			}; export o_cufn=po; o_po_stack_pop
+			#
+			if [[ -n \"${o_o_cmds[-1]}\" ]]; then
+				op $(printf "'%s' " "${ocargs[@]}"); _(){
+					$(declare -f _ | sed '1,2d;$d')
+				}; po
+			fi
+		eof
+		)
+		eval "$o_evals"
+	}
+
+	o_po_init(){ # Init
+		set -o pipefail
+		shopt -s extdebug
+		if term; then stty -echoctl &> /dev/null || true; fi
+		#
+		if [[ -z "$o_sess" ]]; then
+			o_sess=$(uuid)
+			export o_sess
+		fi
+		#
+		trap 'o_abort' INT
+		trap 'o_err op' ERR
+		trap 'o_debug' DEBUG
+	}
+
+	o_po_chck(){ # Checks if op and _ are declared
+		if ! fnex "_"; then
+			quit "Missing _ declaration"
+		fi
+		#
+		if [[ "$o_cufn" != "op" ]]; then
+			quit "Missing op declaration"
+		fi
+		#
+		o_cufn=po
+	}
+
+	o_po_stack_str(){ # Save stack to string
+		cat <<- eof
+			o_o_args=$(o_arry "${o_o_args[@]}")
+			o_o_argl=$(o_arry "${o_o_argl[@]}")
+			o_o_cags=$(o_arry "${o_o_cags[@]}")
+			o_o_cagl=$(o_arry "${o_o_cagl[@]}")
+			o_o_func=$(o_arry "${o_o_func[@]}")
+			o_o_call=$(o_arry "${o_o_call[@]}")
+			o_o_skip=$(o_arry "${o_o_skip[@]}")
+			o_o_uuid=$(o_arry "${o_o_uuid[@]}")
+			o_o_desc=$(o_arry "${o_o_desc[@]}")
+			o_o_exip=$(o_arry "${o_o_exip[@]}")
+			o_o_exic=(${o_o_exic[@]})
+			o_o_errp=$(o_arry "${o_o_errp[@]}")
+			o_o_smry=$(o_arry "${o_o_smry[@]}")
+			o_o_when=$(o_arry "${o_o_when[@]}")
+			o_o_pars=$(o_arry "${o_o_pars[@]}")
+			o_o_rlen=$(o_arry "${o_o_rlen[@]}")
+			o_o_rmtd=$(o_arry "${o_o_rmtd[@]}")
+			o_o_rarg=$(o_arry "${o_o_rarg[@]}")
+			o_o_rsfx=$(o_arry "${o_o_rsfx[@]}")
+			o_o_cmda=$(o_arry "${o_o_cmda[@]}")
+			o_o_cmds=$(o_arry "${o_o_cmds[@]}")
+			o_o_cmdl=$(o_arry "${o_o_cmdl[@]}")
+			o_o_quet=$(o_arry "${o_o_quet[@]}")
+		eof
+	}
+
+	o_po_logp(){ # Parses remote logs
+		local ln; while read -r ln; do
+			case "${ln:0:3}" in
+				"$o_chr_var")
+					local lnarr=($ln)
+					vname=$(o_strm "${lnarr[1]}")
+					val=$( (base64 -d | gzip -d ) <<< "$( o_strm "${lnarr[2]}" )" )
+					export "$vname"="$val"
+				;;
+				*)
+					echo "$ln" >> "/tmp/$o_sess.log"
+				;;
+			esac
+		done <<< "$(</dev/stdin)"
+	}
+
+	o_po_stack_pop(){ # Pop op from the stack
+		unset o_o_func[-1]
+		local i; for (( i=1; i<=${o_o_argl[-1]}; i++ )); do
+			unset o_o_args[-1]
+		done
+		unset o_o_argl[-1]
+		local i; for (( i=1; i<=${o_o_cagl[-1]}; i++ )); do
+			unset o_o_cags[-1]
+		done
+		unset o_o_cagl[-1]
+		unset o_o_call[-1]
+		unset o_o_skip[-1]
+		unset o_o_uuid[-1]
+		unset o_o_desc[-1]
+		unset o_o_exip[-1]
+		unset o_o_exic[-1]
+		unset o_o_errp[-1]
+		unset o_o_smry[-1]
+		unset o_o_when[-1]
+		unset o_o_pars[-1]
+		local i; for (( i=1; i<=${o_o_rlen[-1]}; i++ )); do
+			unset o_o_rmtd[-1]
+			unset o_o_rarg[-1]
+		done
+		unset o_o_rlen[-1]
+		unset o_o_rsfx[-1]
+		unset o_o_cmda[-1]
+		local i; for (( i=1; i<=${o_o_cmdl[-1]}; i++ )); do
+			unset o_o_cmds[-1]
+		done
+		unset o_o_cmdl[-1]
+		unset o_o_quet[-1]
+		#
+		cat > "/tmp/$o_sess.env" <<-eof
+			o_sess="$o_sess"
+			$(o_po_stack_str)
+		eof
+	}
+
+	o_po_finish(){ # Finish
+		[[ ${FUNCNAME[3]} != "o_main" ]] && return
+		trap - INT
+		trap - ERR
+		trap - DEBUG
+	}
+
+
+o_cmd(){ # Checks if op is called as command
+	o_pars(){
+		local x=0; for par in ${o_o_pars[-1]}; do
+			local oargs=("${o_o_cmda[-1]}")
+			if [[ -z "${oargs[$x]}" ]]; then
+				o_cmdm=false
+				return 1
+			fi
+		done
+	}
+	#
+	local oargs=(${o_o_cmda[-1]})
+	local i; for (( i=1; i<=${o_o_cmdl[-1]}; i++ )); do
+		local cmd=(${o_o_cmds[-$i]})
+		if [[ ${cmd[@]} == false && $o_cmdm == false ]]; then
+			return 0
+		elif [[ ${cmd[@]} == true ]] && (( ${#oargs[@]} != 0 )); then
+			o_pars && return 0
+		elif [[ ${cmd[@]} != "" ]]; then
+			local match=true
+			local j; for (( j=0; j<${#cmd[@]}; j++ )); do
+				if [[ ${oargs[$j]} != "${cmd[$j]}" ]]; then
+					match=false
+					break
+				fi
+			done
+			if [[ $match == true ]]; then
+				o_cmdm=true
+				if [[ "$1" == "po" ]]; then
+					o_o_cmda[-1]="${oargs[@]:${#cmd[@]}}"
+				fi
+				o_pars && return 0
+			fi
+		else
+			o_pars && return 0
+		fi
+	done
+	return 1
+}
+
+o_dsc(){ # Sets or displays a script description string
+	if [[ -t 0 || ! -p /dev/stdin ]]; then
+		echo "${o_desc}"
+	else
+		o_desc="$(</dev/stdin)"
+	fi
+}
+
+o_hlp(){ # Sets or displays a script help string
+	if [[ -t 0 || ! -p /dev/stdin ]]; then
+		echo; echo "${o_help}"; echo
+	else
+		o_help="$(</dev/stdin)"
+	fi
+}
+
+o_var(){ # Defines a variable
+	local vname="$1"
+	if [[ -n $2 ]]; then
+		local val; val="$2"
+	else
+		local val; val="$(</dev/stdin)"
+	fi
+	export "$vname"="$val"
+	[[ $o_remt == true ]] && o_log "$o_chr_var $vname $( (gzip | base64 -w0) <<< "$val" )"
+	return
+}
+
+o_debug(){ # Runs on debug trap, prints command
+	[[ ${FUNCNAME[1]} != "_oo_" ]] && return 0
+	[[ ${BASH_COMMAND} == "_oo_" ]] && return 0
+	[[ ${BASH_COMMAND%% *} == "op" ]] && return 0
+	[[ ${BASH_COMMAND} == "po" ]] && return 0
+	[[ ${BASH_COMMAND} == "return \"\$exic\"" ]] && return 0
+	#
+	[[ ${#o_o_errp[@]} != 0 && (( ${o_o_errp[-1]} == 'return' && ${o_o_exic[-1]} != '0' ) || ${o_o_errp[-1]} == 'retry' ) ]] && {
+		return 1
+	}
+	#
+	o_ccmd="$BASH_COMMAND"; o_cfun="${FUNCNAME[@]}"; o_clno="$BASH_LINENO"
+	[[ "$o_ccmd" != "$o_lcmd" ||
+		"$o_cfun" != "$o_lfun" ||
+		("$o_clno" != "$o_llno" && "$o_clno" != '1')
+	]] && [[ ${o_o_quet[-1]} == false ]] && [[ "$$" == "$BASHPID" || $o_test == true ]] && o_print cmd "$BASH_COMMAND"
+	o_lcmd="$o_ccmd"; o_lfun="$o_cfun"; o_llno="$o_clno"
+}
+
+o_err(){ # Runs on error, manually or by trap
+	local exic=$?
+	local amod=$1
+	#
+	[[ ${#o_o_errp[@]} != 0 && (( ${o_o_errp[-1]} == 'return' && ${o_o_exic[-1]} != '0' ) || ${o_o_errp[-1]} == 'retry' ) ]] && return
+	[[ ${FUNCNAME[1]} == 'o_abort' ]] && return
+	#
+	if [[ ${BASH_COMMAND} != "eval \"\$o_evals\"" && ${BASH_COMMAND} != "return \"\$exic\"" ]]; then
+		case $amod in
+			"op")
+				[[ "${o_o_errp[-1]}" != 'ignore' || "${o_o_quet[-1]}" != true ]] && o_print err "$BASH_COMMAND"
+			;;
+			"man")
+				[[ -n "${@:2}" ]] && o_print err "${@:2}"
+				exic=$o_def_exic
+			;;
+			"quit")
+				[[ -n "${@:2}" ]] && o_print lerr "${@:2}"
+				exit $o_def_exic
+			;;
+			*);;
+		esac
+	fi
+	#
+	doo(){
+		local aop="$1"; case $aop in
+			"ignore");;
+			"continue") o_o_exic[-1]=$exic;;
+			"return")   o_o_exic[-1]=$exic; o_o_errp[-1]='return';;
+			"retry")    o_o_errp[-1]='retry';;
+			"exit")     o_exit $exic;;
+			"prompt")
+				prompt(){
+					o_print prompt "[I]gnore / [C]ontinue / [R]eturn / [E]xit / Retr[Y]"
+					local choice; read -rsn1 choice
+					case "$choice" in
+						I|i ) echo "I"; o_print info <<< "Ignoring"; doo 'ignore' ;;
+						C|c ) echo "C"; o_print info <<< "Continuing"; doo 'continue' ;;
+						R|r ) echo "R"; o_print info <<< "Returning"; doo 'return' ;;
+						e|E ) echo "E"; o_print info <<< "Exiting"; doo 'exit' ;;
+						y|Y ) echo "Y"; o_print info <<< "Retrying"; doo 'retry' ;;
+						* ) echo "$choice"; prompt ;;
+					esac
+				}
+				prompt
+			;;
+		esac
+	}
+	#
+	[[ ${#o_o_errp[@]} != 0 ]] && doo "${o_o_errp[-1]}"
+}
+
+o_abort(){ # Runs on Control+C
+	(( ${#o_o_uuid[@]} == 0 )) && return
+	[[ $o_noab == true ]] && return
+	[[ $o_remt == false ]] && o_print abort "Abort";
+	#
+	o_exit "abort"
+}
+
+o_exit(){ # Exits the script
+	local aexic=$1
+	if [[ $aexic =~ ^[0-9]+$ ]]; then
+		local exic=$aexic
+	else
+		local exic=$o_def_exic
+	fi
+	local smry=false
+	for ((i=${#o_o_uuid[@]}-1; i>=0; --i)); do
+		o_o_exic[i]=$exic
+		o_o_errp[i]='return'
+		o_log "$o_chr_len ${o_o_uuid[$i]} $aexic"
+		[[ ${o_o_smry[$i]} == true && ${o_o_func[$i]} == "" ]] && smry=true
+	done;
+	[[ $smry == true ]] && o_smry
+	exit "$exic"
+}
+
+o_print(){ # Prints to the screen
+	local amod=$1
+	local atxt=$2
+	local alvl=$3
+	local asfx=$4
+	#
+	indent()   { echo -ne "$(for ((i=0;i<$((alvl-1));i++)); do echo -ne "$o_chr_idt"; done)"; }
+	separator(){
+		[[ -z $COLUMNS ]] && sleep 0.01
+		if [[ -n $COLUMNS ]]; then local cols=$COLUMNS; else local cols=80; fi
+		for ((i = 0; i < cols; ++i )); do echo -n —; done; echo;
+	}
+	#
+	case $amod in
+		"op")       echo;separator;white;bold; echo -n $o_chr_oph $atxt $asfx;     nocolor; echo;;
+		"opskip")   echo;dim;bold;             echo -n $o_chr_skp $atxt $asfx;     nocolor; echo;;
+		"cmd")      bold;                      echo -n $o_chr_cmd "$atxt";         nocolor; echo;;
+		"ssh")      white;bold;                echo -n $o_chr_ssh $atxt $asfx;     nocolor; echo;;
+		"chroot")   white;bold;                echo -n $o_chr_chr $atxt $asfx;     nocolor; echo;;
+		"err")      red;                       echo -n $o_chr_err $atxt $asfx;     nocolor; echo;;
+		"lerr")     red;                       echo -n $o_chr_ler $atxt $asfx;     nocolor; echo;;
+		"abort")    orange;                    echo -n $o_chr_abt $atxt $asfx;     nocolor; echo;;
+		"sum")      echo;separator;white;bold; echo -n $o_chr_sum $atxt $asfx;     nocolor; echo;;
+		"ok")       indent;green;              echo -n $o_chr_ook $atxt $asfx;     nocolor; echo;;
+		"skipped")  indent;dim;                echo -n $o_chr_skp $atxt $asfx;     nocolor; echo;;
+		"failed")   indent;red;                echo -n $o_chr_err $atxt $asfx;     nocolor; echo;;
+		"aborted")  indent;orange;             echo -n $o_chr_abt $atxt $asfx;     nocolor; echo;;
+		"unk")      indent;lpurple;            echo -n $o_chr_unk $atxt $asfx;     nocolor; echo;;
+		"info")     orange;                    echo -n $o_chr_inf "$(cat)";        nocolor; echo;;
+		"prompt")   orange;                    echo -n $o_chr_pmt "$atxt: " $asfx; nocolor;;
+		*);;
+	esac;
+}
+o_nocolor() { if term; then echo -ne '\033[0m'; fi }
+o_bold()    { if term; then echo -ne '\033[1m'; fi }
+o_dim()     { if term; then echo -ne '\033[2m'; fi }
+o_white()   { if term; then echo -ne '\033[0;37m'; fi }
+o_red()     { if term; then echo -ne '\033[0;31m'; fi }
+o_green()   { if term; then echo -ne '\033[0;32m'; fi }
+o_orange()  { if term; then echo -ne '\033[0;33m'; fi }
+o_yellow()  { if term; then echo -ne '\033[1;33m'; fi }
+o_lpurple() { if term; then echo -ne '\033[1;35m'; fi }
+
+o_log(){ # Writes to the log
+	echo "$1" >> "/tmp/$o_sess.log"
+}
+
+o_smry(){ # Prints summary from log
+	o_noab=true
+	local logarr; readarray logarr < "/tmp/$o_sess.log"
+	o_print sum "Summary"
+	local i=0; local ln; for ln in "${logarr[@]}"; do
+		local i=$((i+1))
+		local lna=($ln)
+		local op=${lna[0]}
+		local id=${lna[1]}
+		local level=${lna[2]}
+		local desc=${lna[*]:3}
+		local code="unk"
+		if [[ $op == "$o_chr_lst" ]]; then
+			local j=0
+			local ln2; for ln2 in "${logarr[@]}"; do
+				local j=$((j+1))
+				local ln2a=(${ln2})
+				local op2=${ln2a[0]}
+				local id2=${ln2a[1]}
+				if [[ $op2 == "$o_chr_len" && $id == "$id2" ]]; then
+					local code; code=$(o_strm "${ln2a[2]}")
+					break
+				fi
+			done
+			case $code in
+				"abort") o_print aborted "$desc" "$level";;
+				"skip")  o_print skipped "$desc" "$level";;
+				"nocmd") ;;
+				"unk")   o_print unk     "$desc" "$level";;
+				"0")     o_print ok      "$desc" "$level";;
+				  *)     o_print failed  "$desc" "$level";;
+			esac
+		fi
+	done
+	o_noab=false
+}
+
+o_quiet(){ # Suppresses the command listing
+	o_o_quet[-1]=true
+	local errp=${o_o_errp[-1]}
+	o_o_errp[-1]='ignore'
+	"$@" &> /dev/null
+	o_o_errp[-1]=$errp
+	o_o_quet[-1]=false
+}
+
+o_opsnew(){ # Start new ops session
+	export o_sess=""
+}
+
+# HANDLES
+command_not_found_handle() { # Handle for command not found
+	o_print err "$1: command not found"
+	return 127
+}
+
+# UTILS
+o_fdup(){
+	local afile; afile="$1"
+	local parent; parent="$(pwd)"
+	until [[ $parent == "" ]]; do
+		[[ -f $parent/$afile ]] && echo "$parent/$afile" && return 0
+		parent=${parent%/*}
+	done
+	return 1
+}
+
+o_fnex(){ # Checks if function is defined
+	declare -F "$1" > /dev/null
+}
+
+o_fnrm(){
+	unset -f $1
+}
+
+o_uuid(){
+	echo "$(</proc/sys/kernel/random/uuid)"
+}
+
+o_arry(){
+	echo -n "( "
+	for arg in "$@"; do
+		echo -n "${arg@Q} "
+	done
+	echo -n ")"
+	echo
+}
+
+o_term(){
+	[[ -t 1 ]] && return 0
+	return 1
+}
+
+o_strm(){
+	local astr="$1"
+	#
+	astr="${astr#"${astr%%[![:space:]]*}"}"
+	astr="${astr%"${astr##*[![:space:]]}"}"
+	echo -n "$astr"
+}
+
+o_sstr(){
+	case $1 in
+		*$2*) return 0 ;;
+		*)    return 1 ;;
+	esac
+}
+
+o_snas(){
+	echo "$1" | sed 's/\x1B[@A-Z\\\]^_]\|\x1B\[[0-9:;<=>?]*[-!"#$%&'"'"'()*+,.\/]*[][\\@A-Z^_`a-z{|}~]//g'
+}
+
+o_slen(){
+	local nstr; nstr="$(o_snas "$1")"
+	echo "${#nstr}"
+}
+
+o_sljt(){
+	local astr; astr="$1"
+	local alen; alen="$2"
+	#
+	printf "%s" "$astr"
+	nspaces=$(( alen - $(o_slen "$astr") ))
+	printf "%*s" $nspaces
+}
+
+o_slwd(){
+	local astr; astr="$(</dev/stdin)"
+	echo -n "${astr//* }"
+}
+
+o_stln(){
+	local astr; astr="$(</dev/stdin)"
+	local nchar; nchar=$1
+	echo -n "${astr::-$nchar}"
+}
+
+o_vers(){
+	[[ "$1" == "$2" ]] && return 0
+	local IFS; IFS=.; local i;
+	local ver1; ver1=($1); for((i=${#ver1[@]}; i<${#ver2[@]}; i++)); do
+		ver1[i]=0
+	done
+	local ver2; ver2=($2); for ((i=0; i<${#ver1[@]}; i++)); do
+		if [[ -z ${ver2[i]} ]];then
+			ver2[i]=0
+		fi
+		if ((10#${ver1[i]} > 10#${ver2[i]})); then
+			return 1
+		elif ((10#${ver1[i]} < 10#${ver2[i]})); then
+			return 2
+		fi
+	done
+	return 0
+}
+
+o_line(){
+	key(){
+		local astr; astr=$(o_trim "$1")
+		local argsep; argsep="$2"
+		#
+		if [[ $astr =~ (^[^    :=]+)(.*) ]]; then
+			echo "${BASH_REMATCH[1]}"
+		else
+			echo "$astr"
+		fi
+	}
+	sep(){
+		local astr; astr=$(o_trim "$1")
+		local argsep; argsep="$2"
+		#
+		if [[ $astr =~ (^[^    :=]+)(.*) ]]; then
+			if [[ -z $(o_trim "${BASH_REMATCH[2]:0:1}") ]]; then
+				echo " "
+			else
+				echo "${BASH_REMATCH[2]:0:1}"
+			fi
+		fi
+	}
+	local aline; aline=$2
+	local afile; afile=$1
+	local replc; replc=false
+	local ln; while read -r ln; do
+		if [[ $(key "$aline") == $(key "$ln") && $(sep "$aline") == $(sep "$ln") ]]; then
+			replc=true
+			echo "$aline"
+		else
+			echo "$ln"
+		fi
+	done <<< "$(
+		if [[ -f $afile ]]; then
+			echo "$(<$afile)"
+		else
+			while read -r ln; do echo "$ln"; done
+		fi
+	)"
+	#
+	if [[ $replc == false ]]; then
+		echo "$aline"
+	fi
+}
+
+o_tree(){
+	local max; max=0; local tree_out; tree_out=$(tree -AF --info --dirsfirst $@)
+	IFS=; local ln; while read -r ln; do
+		if [ ${#ln} -gt "$max" ]; then max=${#ln}; fi
+	done <<< "$tree_out"
+	#
+	local regex1; regex1="(.*)(\{)(.*)";
+	local regex2; regex2="(.*)(\⎧)(.*)";
+	local regex3; regex3="(.*)(\⎨)(.*)";
+	local regex4; regex4="(.*)(\⎪)(.*)";
+	local regex5; regex5="(.*)(\⎩)(.*)";
+	IFS=; local ln;	local tree_out; tree_out=$(tree -AFC --info --dirsfirst $@); while read -r ln; do
+		if [[ $ln =~ $regex1 ]]; then
+			o_dim
+			printf " #%s" "${BASH_REMATCH[3]}"
+		elif [[ $ln =~ $regex2 ]]; then
+			o_dim
+			printf " #%s" "${BASH_REMATCH[3]}"
+		elif [[ $ln =~ $regex3 ]]; then
+			nocolor;
+			printf "\n$(o_sljt "${BASH_REMATCH[1]}" "${length}")%s"
+			o_dim
+			printf " #%s" "${BASH_REMATCH[3]}"
+		elif [[ $ln =~ $regex4 ]]; then
+			nocolor;
+			printf "\n$(o_sljt "${BASH_REMATCH[1]}" "${length}")%s"
+			o_dim
+			printf " #%s" "${BASH_REMATCH[3]}"
+		elif [[ $ln =~ $regex5 ]]; then
+			nocolor;
+			printf "\n$(o_sljt "${BASH_REMATCH[1]}" "${length}")%s"
+			o_dim
+			printf " #%s" "${BASH_REMATCH[3]}"
+		else
+			o_nocolor
+			printf "\n%s" "$ln"
+			length=$(len "$ln")
+		fi
+	done <<< "$tree_out"
+	echo
+}
+
+o_path(){
+	local afile; afile="$1"
+	local parent; parent="${afile%/*}"
+	mkdir -p "$parent" > /dev/null
+	echo "$afile"
+}
+
+# MAIN
+o_main "$@"
